@@ -4,6 +4,7 @@ from __future__ import annotations
 import ipaddress
 from urllib.parse import urlsplit, urlunsplit
 
+
 class UnsafeTargetError(ValueError):
     """Raised when a URL could target a non-public or unsupported destination."""
 
