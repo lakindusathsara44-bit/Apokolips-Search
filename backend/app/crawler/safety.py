@@ -1,5 +1,6 @@
 """URL validation and public-address checks used by every outbound request."""
 from __future__ import annotations
+
 import ipaddress
 from urllib.parse import urlsplit, urlunsplit
 
