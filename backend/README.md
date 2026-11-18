@@ -1,6 +1,6 @@
 # Backend
 
-FastAPI service for Apokolips Search: Apokolips Spider, SQLite metadata and durable queue, FTS5/BM25 search, public API keys, and per-key quotas.
+FastAPI service for Apokolips Search: a Brave Search API proxy for Level 1 web search, plus Apokolips Spider, SQLite metadata and durable queue, FTS5/BM25 search, public API keys, and per-key quotas.
 
 ## Run locally
 
@@ -49,6 +49,10 @@ Example search:
       --data-urlencode "page_size=10"
 
 See [Public API v1](../docs/public-api.md) for complete requests, response format, errors, and production checklist.
+
+## Level 1 web search provider
+
+Set `BRAVE_SEARCH_API_KEY` in the backend process environment and optionally set `BRAVE_SEARCH_COUNTRY=LK`. The frontend calls `GET /api/v1/web-search?q=...&page=1&page_size=10`; the server calls Brave using `X-Subscription-Token`. The upstream key is never sent to the browser. Results are not cached or stored in the Apokolips index. A simple in-memory limit of 30 requests per client IP per minute protects a single backend process. See [Level 1 Web Search](../docs/level-1-web-search.md).
 
 ## Crawler endpoints
 

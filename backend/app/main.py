@@ -8,7 +8,7 @@ import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -17,6 +17,13 @@ from .api_access import (
     admin_token_matches,
     configured_admin_token,
     public_mode_enabled,
+)
+from .brave_search import (
+    BraveSearchClient,
+    ClientSearchRateLimiter,
+    SearchProviderError,
+    SearchProviderNotConfigured,
+    SearchProviderRateLimited,
 )
 from .crawl_queue import CrawlQueue
 from .crawl_worker import run_crawl_worker
@@ -45,11 +52,14 @@ def create_app(
     search_store: SearchStore | None = None,
     crawl_queue: CrawlQueue | None = None,
     api_key_store: APIKeyStore | None = None,
+    brave_search_client: BraveSearchClient | None = None,
 ) -> FastAPI:
     """Application factory; tests may inject isolated database components."""
     store = search_store or SearchStore()
     queue = crawl_queue or CrawlQueue(store.database_path)
     key_store = api_key_store or APIKeyStore(store.database_path)
+    brave_client = brave_search_client or BraveSearchClient()
+    web_search_limiter = ClientSearchRateLimiter(requests_per_minute=30)
     is_public = public_mode_enabled()
     admin_token = configured_admin_token()
 
@@ -97,17 +107,19 @@ def create_app(
 
     api = FastAPI(
         title="Apokolips Search API",
-        version="0.5.0",
+        version="0.6.0",
         description=(
-            "Apokolips Search public API. API-key authenticated search is served from "
-            "Apokolips' own SQLite FTS5 index with per-key request quotas. The local "
-            "crawler and its management endpoints remain administrator-controlled."
+            "Apokolips Search provides a Level 1 Brave-powered web search proxy and a "
+            "separate API-key authenticated first-party SQLite FTS5 search index. "
+            "Crawler and management endpoints remain administrator-controlled."
         ),
         lifespan=lifespan,
     )
     api.state.search_store = store
     api.state.crawl_queue = queue
     api.state.api_key_store = key_store
+    api.state.brave_search_client = brave_client
+    api.state.web_search_limiter = web_search_limiter
 
     configured_origins = os.getenv(
         "APOKOLIPS_CORS_ORIGINS",
@@ -141,7 +153,7 @@ def create_app(
         return {
             "status": "ok",
             "service": "apokolips-search-api",
-            "version": "0.5.0",
+            "version": "0.6.0",
             "database": "ready",
             "index": "SQLite FTS5",
         }
@@ -152,6 +164,7 @@ def create_app(
             "message": "Apokolips Search API",
             "docs": "/docs",
             "search": "/api/v1/search?q=your+query",
+            "web_search": "/api/v1/web-search?q=your+query",
             "api_version": "v1",
         }
 
@@ -361,6 +374,58 @@ def create_app(
             "engine": "Apokolips Search",
             **result,
         }
+
+    @api.get(
+        "/api/v1/web-search",
+        tags=["web search"],
+        summary="Search the public web through Brave Search",
+        description=(
+            "Level 1 web search proxy. The Brave API key stays on the server; "
+            "provider results are returned transiently and are not stored in the Apokolips index."
+        ),
+    )
+    async def web_search(
+        request: Request,
+        response: Response,
+        q: str = Query(min_length=1, max_length=600, description="Web search terms"),
+        page: int = Query(default=1, ge=1, le=10),
+        page_size: int = Query(default=10, ge=1, le=20),
+    ) -> dict:
+        query = q.strip()
+        if not query or len(query.split()) > 75:
+            raise HTTPException(
+                status_code=422,
+                detail="Query must contain 1–600 non-space characters and no more than 75 words.",
+            )
+
+        client_key = request.client.host if request.client else "unknown"
+        allowed, retry_after = web_search_limiter.consume(client_key)
+        if not allowed:
+            raise HTTPException(
+                status_code=429,
+                detail="Search request limit reached. Please retry after the current minute window.",
+                headers={"Retry-After": str(retry_after)},
+            )
+
+        try:
+            result = await brave_client.search(query, page=page, page_size=page_size)
+        except SearchProviderNotConfigured as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from None
+        except SearchProviderRateLimited as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="The upstream search provider is temporarily rate-limited. Please retry shortly.",
+                headers={"Retry-After": "60"},
+            ) from exc
+        except SearchProviderError:
+            raise HTTPException(
+                status_code=502,
+                detail="The upstream search provider could not complete the request.",
+            ) from None
+
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return result
 
     @api.post(
         "/admin/api-keys",

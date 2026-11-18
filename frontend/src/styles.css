@@ -24,3 +24,6 @@
 .pagination button:disabled{opacity:.4;cursor:not-allowed}
 .search-button:disabled{opacity:.7;cursor:wait}
 @media(max-width:650px){.results-section{margin-bottom:36px}.result-card{padding:15px 12px}.result-card h2{font-size:15px}.pagination{gap:9px}.pagination button{padding:8px 10px}}
+
+.category:disabled{opacity:.42;cursor:not-allowed}
+.category:disabled:hover{background:transparent;color:#8294b1}

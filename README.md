@@ -1,10 +1,12 @@
 # Apokolips Search
 
-An independent web search engine by Apokolips. Search results come from its own crawler and first-party index, not from another search provider.
+A web-search experience by Apokolips. Level 1 uses the Brave Search API to display live web results through an Apokolips-designed interface. The Apokolips Spider crawler and first-party SQLite index remain separate components for later stages.
 
 ## Current status
 
-**Phase 05 — Public Search API v1.**
+**Level 1 — Basic Web Search (Brave Search API integration).**
+
+The frontend now uses the server-side Brave Web Search proxy for web results. The API key remains on the backend, results are returned transiently, and provider responses are not written to the local index. The earlier first-party developer API remains available separately.
 
 - Phase 01: React + Vite + TypeScript frontend and FastAPI foundation.
 - Phase 02: Apokolips Spider crawler with robots.txt policy checks, sitemap discovery, safe URL handling, and bounded fetching.
@@ -43,7 +45,8 @@ Open http://127.0.0.1:5173. API documentation is at http://127.0.0.1:8000/docs.
 
 ## Public Search API v1
 
-- `GET /api/v1/search?q=...` — public search over the Apokolips first-party index; requires `X-API-Key`.
+- `GET /api/v1/search?q=...` — API-key authenticated search over the Apokolips first-party SQLite index.
+- `GET /api/v1/web-search?q=...` — Level 1 live web search through Brave; configured with the backend-only `BRAVE_SEARCH_API_KEY`.
 - `POST /admin/api-keys` — create a developer key (administrator bearer token required).
 - `GET /admin/api-keys` — list key metadata without secrets.
 - `DELETE /admin/api-keys/{key_id}` — revoke a key.
@@ -63,9 +66,13 @@ Set `APOKOLIPS_PUBLIC_MODE=true` and a unique `APOKOLIPS_ADMIN_TOKEN` (at least 
 
 The database is created at `backend/data/apokolips-search.sqlite3`; override it with `APOKOLIPS_DB_PATH`. Keep the database on persistent storage when hosted. The initial public deployment model is a single API instance using one persistent SQLite database; it is not yet a distributed or horizontally scaled service.
 
+## Level 1 web search provider setup
+
+Set `BRAVE_SEARCH_API_KEY` on the backend and optionally set `BRAVE_SEARCH_COUNTRY=LK`. Never expose the key through a `VITE_*` variable or browser bundle. See [Level 1 Web Search](docs/level-1-web-search.md) for setup, API behaviour, privacy and provider-term notes. Brave requires an activated plan; check current pricing and usage in its dashboard before public release.
+
 ## Search design and current limits
 
-SQLite FTS5 provides Unicode full-text matching and weighted BM25 ranking: title 20, description 3, headings 5, body 1. Search terms use AND semantics. The index contains only pages that Apokolips has actually crawled and stored; it is not a copy of the entire web. Image, video, and news search are not implemented.
+The first-party index remains a separate feature. SQLite FTS5 provides Unicode full-text matching and weighted BM25 ranking: title 20, description 3, headings 5, body 1. Search terms use AND semantics. The index contains only pages that Apokolips has actually crawled and stored; it is not a copy of the entire web. Image, video, and news search are not implemented.
 
 ## Validation
 
