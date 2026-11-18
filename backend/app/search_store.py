@@ -120,7 +120,7 @@ class SearchStore:
                     USING fts5(
                         title,
                         description,
-                        headings,
+                        headings_json,
                         body,
                         content='documents',
                         content_rowid='id',
@@ -137,13 +137,13 @@ class SearchStore:
             connection.executescript(
                 """
                 CREATE TRIGGER IF NOT EXISTS documents_ai AFTER INSERT ON documents BEGIN
-                    INSERT INTO documents_fts(rowid, title, description, headings, body)
+                    INSERT INTO documents_fts(rowid, title, description, headings_json, body)
                     VALUES (new.id, new.title, new.description, new.headings_json, new.body);
                 END;
 
                 CREATE TRIGGER IF NOT EXISTS documents_ad AFTER DELETE ON documents BEGIN
                     INSERT INTO documents_fts(
-                        documents_fts, rowid, title, description, headings, body
+                        documents_fts, rowid, title, description, headings_json, body
                     )
                     VALUES (
                         'delete', old.id, old.title, old.description,
@@ -159,7 +159,7 @@ class SearchStore:
                         'delete', old.id, old.title, old.description,
                         old.headings_json, old.body
                     );
-                    INSERT INTO documents_fts(rowid, title, description, headings, body)
+                    INSERT INTO documents_fts(rowid, title, description, headings_json, body)
                     VALUES (new.id, new.title, new.description, new.headings_json, new.body);
                 END;
                 """
