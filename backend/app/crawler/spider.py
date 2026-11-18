@@ -1,11 +1,14 @@
 """Bounded asynchronous crawler with robots, rate, size, and SSRF safeguards."""
 from __future__ import annotations
+
 import asyncio
 import time
 from dataclasses import dataclass, field
 from urllib.parse import urljoin, urlsplit
 from urllib.robotparser import RobotFileParser
+
 import aiohttp
+
 from .config import CrawlConfig
 from .parsing import ExtractedDocument, extract_html, extract_sitemap_urls, parse_robots
 from .resolver import PublicOnlyResolver
@@ -167,7 +170,7 @@ class ApokolipsSpider:
                 url, "response_too_large", "Response exceeded the configured byte limit"
             ))
             return result
-        except (aiohttp.ClientError, asyncio.TimeoutError, OSError, UnsafeTargetError):
+        except (aiohttp.ClientError, TimeoutError, OSError, UnsafeTargetError):
             result.issues.append(CrawlIssue(
                 url, "request_failed", "Request failed or the destination was rejected"
             ))
@@ -193,7 +196,7 @@ class ApokolipsSpider:
             return result
         try:
             page = extract_html(response.body, response.final_url)
-        except Exception:
+        except (TypeError, UnicodeError, ValueError):
             result.issues.append(CrawlIssue(
                 url, "html_parse_failed", "The HTML page could not be parsed"
             ))
