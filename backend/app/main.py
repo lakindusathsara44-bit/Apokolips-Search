@@ -8,11 +8,11 @@ import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from .api_access import (
+from .brave_search import (\n    BraveSearchClient,\n    ClientSearchRateLimiter,\n    SearchProviderError,\n    SearchProviderNotConfigured,\n    SearchProviderRateLimited,\n)\nfrom .api_access import (
     APIKeyStore,
     admin_token_matches,
     configured_admin_token,
@@ -361,6 +361,58 @@ def create_app(
             "engine": "Apokolips Search",
             **result,
         }
+
+    @api.get(
+        "/api/v1/web-search",
+        tags=["web search"],
+        summary="Search the public web through Brave Search",
+        description=(
+            "Level 1 web search proxy. The Brave API key stays on the server; "
+            "provider results are returned transiently and are not stored in the Apokolips index."
+        ),
+    )
+    async def web_search(
+        request: Request,
+        response: Response,
+        q: str = Query(min_length=1, max_length=600, description="Web search terms"),
+        page: int = Query(default=1, ge=1, le=10),
+        page_size: int = Query(default=10, ge=1, le=20),
+    ) -> dict:
+        query = q.strip()
+        if not query or len(query.split()) > 75:
+            raise HTTPException(
+                status_code=422,
+                detail="Query must contain 1–600 non-space characters and no more than 75 words.",
+            )
+
+        client_key = request.client.host if request.client else "unknown"
+        allowed, retry_after = web_search_limiter.consume(client_key)
+        if not allowed:
+            raise HTTPException(
+                status_code=429,
+                detail="Search request limit reached. Please retry after the current minute window.",
+                headers={"Retry-After": str(retry_after)},
+            )
+
+        try:
+            result = await brave_client.search(query, page=page, page_size=page_size)
+        except SearchProviderNotConfigured as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from None
+        except SearchProviderRateLimited as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="The upstream search provider is temporarily rate-limited. Please retry shortly.",
+                headers={"Retry-After": "60"},
+            ) from exc
+        except SearchProviderError:
+            raise HTTPException(
+                status_code=502,
+                detail="The upstream search provider could not complete the request.",
+            ) from None
+
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return result
 
     @api.post(
         "/admin/api-keys",
