@@ -6,6 +6,7 @@ from app.crawler.safety import (
     validate_resolved_addresses,
 )
 
+
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
