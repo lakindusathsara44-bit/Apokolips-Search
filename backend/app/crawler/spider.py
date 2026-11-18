@@ -5,12 +5,17 @@ import asyncio
 import time
 from dataclasses import dataclass, field
 from urllib.parse import urljoin, urlsplit
-from urllib.robotparser import RobotFileParser
 
 import aiohttp
 
 from .config import CrawlConfig
-from .parsing import ExtractedDocument, extract_html, extract_sitemap_urls, parse_robots
+from .parsing import (
+    ExtractedDocument,
+    RobotsRules,
+    extract_html,
+    extract_sitemap_urls,
+    parse_robots,
+)
 from .resolver import PublicOnlyResolver
 from .safety import UnsafeTargetError, normalize_url
 
@@ -35,7 +40,7 @@ class CrawlReport:
 @dataclass(slots=True)
 class _RobotsPolicy:
     available: bool
-    parser: RobotFileParser | None = None
+    parser: RobotsRules | None = None
     sitemap_urls: list[str] = field(default_factory=list)
 
 @dataclass(slots=True)
@@ -110,7 +115,9 @@ class ApokolipsSpider:
                 )
                 processed += len(wave)
                 for requested_url, result in zip(wave, results, strict=True):
-                    if isinstance(result, BaseException):
+                    if isinstance(result, asyncio.CancelledError):
+                        raise result
+                    if isinstance(result, Exception):
                         issues.append(CrawlIssue(
                             requested_url, "worker_error", "The URL could not be processed"
                         ))
