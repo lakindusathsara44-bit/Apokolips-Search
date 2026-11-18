@@ -160,6 +160,8 @@ export default function App() {
               className={category === label ? "category active" : "category"}
               onClick={() => {
                 setCategory(label);
+                setResults([]);
+                setHasSearched(false);
                 setNotice(label === "Web" ? "" : label + " search is planned for a later phase.");
               }}
               type="button"
