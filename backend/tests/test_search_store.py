@@ -6,8 +6,8 @@ from fastapi.testclient import TestClient
 import app.main as main_module
 from app.crawler.parsing import ExtractedDocument
 from app.crawler.spider import CrawlIssue, CrawlReport
-from app.search_store import SearchStore, build_fts_query
 from app.main import create_app
+from app.search_store import SearchStore, build_fts_query
 
 
 def make_page(
