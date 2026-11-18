@@ -224,6 +224,21 @@ def test_early_fts_column_schema_is_migrated_and_rebuilt(tmp_path) -> None:
     assert result["results"][0]["snippet"] == "Legacy search content is restored"
 
 
+
+def test_initialize_marks_interrupted_crawl_runs_as_failed(tmp_path) -> None:
+    store = SearchStore(tmp_path / "search.sqlite3")
+    store.initialize()
+    run_id = store.create_crawl_run(["https://example.com/"])
+
+    # Reinitializing the store represents the application starting after a crash.
+    store.initialize()
+
+    run = store.get_crawl_run(run_id)
+    assert run is not None
+    assert run["status"] == "failed"
+    assert run["error_message"] == "Server restarted before the crawl completed"
+
+
 def test_failed_crawl_run_is_recorded(tmp_path) -> None:
     store = SearchStore(tmp_path / "search.sqlite3")
     store.initialize()
