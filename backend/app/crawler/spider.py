@@ -220,7 +220,7 @@ class ApokolipsSpider:
                     session, robots_url, self.config.max_robots_bytes
                 )
             except (
-                aiohttp.ClientError, asyncio.TimeoutError, OSError,
+                aiohttp.ClientError, TimeoutError, OSError,
                 UnsafeTargetError, _ResponseTooLarge,
             ):
                 policy = _RobotsPolicy(available=False)
