@@ -1,12 +1,15 @@
 """Robots, HTML, and XML sitemap parsing with bounded output."""
 from __future__ import annotations
+
 import hashlib
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from urllib.parse import urljoin
 from urllib.robotparser import RobotFileParser
+
 from bs4 import BeautifulSoup
+
 from .safety import UnsafeTargetError, normalize_url
 
 MAX_PAGE_TEXT_CHARS = 60_000
@@ -58,7 +61,7 @@ def extract_html(html: bytes, page_url: str) -> ExtractedDocument:
     title_node = soup.find("title")
     title = title_node.get_text(" ", strip=True)[:500] if title_node else ""
     description = ""
-    description_node = soup.find("meta", attrs={"name": re.compile(r"^description$", re.I)})
+    description_node = soup.find("meta", attrs={"name": re.compile(r"^description$", re.IGNORECASE)})
     if description_node and description_node.get("content"):
         description = str(description_node["content"]).strip()[:1000]
 
