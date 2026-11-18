@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -52,7 +53,7 @@ def create_app(search_store: SearchStore | None = None) -> FastAPI:
     def health() -> dict[str, str]:
         try:
             store.health()
-        except (OSError, RuntimeError, ValueError):
+        except (OSError, RuntimeError, ValueError, sqlite3.Error):
             raise HTTPException(status_code=503, detail="Search database is unavailable") from None
         return {
             "status": "ok",
