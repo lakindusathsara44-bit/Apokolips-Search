@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -101,7 +101,7 @@ def create_app(search_store: SearchStore | None = None) -> FastAPI:
         except ValueError as exc:
             await asyncio.to_thread(store.fail_crawl_run, run_id, str(exc))
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - mark and report any unexpected crawl failure
             await asyncio.to_thread(
                 store.fail_crawl_run,
                 run_id,
