@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from fastapi.testclient import TestClient
 import pytest
+from fastapi.testclient import TestClient
 
 import app.main as main_module
 from app.crawler.parsing import ExtractedDocument
