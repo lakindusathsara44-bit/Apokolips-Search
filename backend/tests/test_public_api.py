@@ -7,9 +7,9 @@ import httpx
 import pytest
 
 from app.api_access import APIKeyStore
+from app.crawler.parsing import ExtractedDocument
 from app.main import create_app
 from app.search_store import SearchStore
-from app.crawler.parsing import ExtractedDocument
 
 
 ADMIN_TOKEN = "test-admin-token-that-is-long-enough-for-production"
