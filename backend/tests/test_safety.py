@@ -1,5 +1,10 @@
 import pytest
-from app.crawler.safety import UnsafeTargetError, normalize_url, validate_resolved_addresses
+
+from app.crawler.safety import (
+    UnsafeTargetError,
+    normalize_url,
+    validate_resolved_addresses,
+)
 
 @pytest.mark.parametrize(
     ("raw", "expected"),
