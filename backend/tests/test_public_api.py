@@ -7,7 +7,6 @@ import httpx
 import pytest
 
 from app.api_access import APIKeyStore
-from app.crawl_queue import CrawlQueue
 from app.crawler.parsing import ExtractedDocument
 from app.main import create_app
 from app.search_store import SearchStore
@@ -215,6 +214,8 @@ def test_public_mode_hides_legacy_search_and_protects_crawler_controls(
     monkeypatch,
     tmp_path,
 ) -> None:
+    from app.crawl_queue import CrawlQueue
+
     monkeypatch.setenv("APOKOLIPS_PUBLIC_MODE", "true")
     monkeypatch.setenv("APOKOLIPS_ADMIN_TOKEN", ADMIN_TOKEN)
     search = make_search_store(tmp_path)
