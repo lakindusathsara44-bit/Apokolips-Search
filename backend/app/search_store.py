@@ -7,9 +7,10 @@ import os
 import re
 import sqlite3
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Iterator
 
 from .crawler.parsing import ExtractedDocument
 from .crawler.spider import CrawlIssue, CrawlReport
@@ -47,12 +48,17 @@ class SearchStore:
             )
         self.database_path = Path(database_path).expanduser().resolve()
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self.database_path, timeout=10)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA busy_timeout = 10000")
-        return connection
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     def initialize(self) -> None:
         """Create or safely upgrade the local metadata and full-text schema."""
