@@ -389,6 +389,7 @@ class SearchStore:
                     d.title,
                     d.description,
                     d.language,
+                    d.body AS body_text,
                     snippet(documents_fts, 3, '', '', ' … ', 28) AS excerpt,
                     bm25(documents_fts, 20.0, 3.0, 5.0, 1.0) AS bm25_rank,
                     d.last_crawled_at
@@ -405,7 +406,9 @@ class SearchStore:
         for row in rows:
             excerpt = (row["excerpt"] or "").strip()
             if not excerpt:
-                excerpt = (row["description"] or "").strip()
+                excerpt = (
+                    row["description"] or row["body_text"] or ""
+                ).strip()
             results.append(
                 {
                     "id": int(row["id"]),
