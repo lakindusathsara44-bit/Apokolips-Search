@@ -46,10 +46,7 @@ In public mode:
 
 Send the administrator token as a bearer token. The request can be made in Swagger UI at `/docs` or with curl:
 
-    curl -X POST http://127.0.0.1:8000/admin/api-keys ^
-      -H "Authorization: Bearer YOUR_ADMIN_TOKEN" ^
-      -H "Content-Type: application/json" ^
-      -d "{\"name\":\"My application\",\"requests_per_minute\":60}"
+    curl -X POST http://127.0.0.1:8000/admin/api-keys -H "Authorization: Bearer YOUR_ADMIN_TOKEN" -H "Content-Type: application/json" -d "{\"name\":\"My application\",\"requests_per_minute\":60}"
 
 Example request:
 
@@ -70,11 +67,7 @@ All three require `Authorization: Bearer YOUR_ADMIN_TOKEN`.
 
 ## Search
 
-    curl --get http://127.0.0.1:8000/api/v1/search ^
-      -H "X-API-Key: aps_live_your_key" ^
-      --data-urlencode "q=Apokolips search" ^
-      --data-urlencode "page=1" ^
-      --data-urlencode "page_size=10"
+    curl --get http://127.0.0.1:8000/api/v1/search -H "X-API-Key: aps_live_your_key" --data-urlencode "q=Apokolips search" --data-urlencode "page=1" --data-urlencode "page_size=10"
 
 ### Query parameters
 
