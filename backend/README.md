@@ -1,8 +1,8 @@
 # Backend
 
-Local FastAPI API, Apokolips Spider crawler, SQLite metadata store and durable queue, background worker, and first-party FTS5 search engine.
+FastAPI service for Apokolips Search: Apokolips Spider, SQLite metadata and durable queue, FTS5/BM25 search, public API keys, and per-key quotas.
 
-## Run
+## Run locally
 
     python -m venv .venv
     # Windows PowerShell: .venv\Scripts\Activate.ps1
@@ -13,55 +13,56 @@ Local FastAPI API, Apokolips Spider crawler, SQLite metadata store and durable q
 Health check: http://127.0.0.1:8000/health  
 Interactive API docs: http://127.0.0.1:8000/docs
 
-The local SQLite database is created automatically at `backend/data/apokolips-search.sqlite3`. Override its location with `APOKOLIPS_DB_PATH`.
+The SQLite database is created at `backend/data/apokolips-search.sqlite3`. Override it with `APOKOLIPS_DB_PATH`.
 
-## Main API endpoints
+## Public Search API v1
 
-- `POST /crawl` — run a bounded crawl immediately, persist its metadata/pages, and update the index.
-- `POST /crawl/jobs` — queue a crawl for background execution (HTTP 202).
-- `GET /crawl/jobs` — list recent queued/running/completed/failed jobs.
-- `GET /crawl/jobs/{job_id}` — inspect one job, including retry and crawl-run metadata.
-- `POST /crawl/jobs/{job_id}/cancel` — cancel a job only while it is pending.
-- `GET /search?q=...` — search Apokolips' own FTS5 index using BM25 ranking.
-- `GET /stats` — return indexed document and crawl-run counts.
-- `GET /crawl/runs` — list recent crawl runs.
-- `GET /crawl/runs/{run_id}` — inspect one crawl run.
-- `GET /health` — check database and FTS5 availability.
+`GET /api/v1/search?q=...` requires an active key in `X-API-Key`. Results come from Apokolips' own FTS5 index, with title/description/headings/body weighted BM25 ranking. The public endpoint supports `page` (1–10,000) and `page_size` (1–20). Query length is 1–200 characters and at most 12 searchable words.
 
-Example background job request:
+Keys default to 60 requests/minute; the administrator can configure 1–600 requests/minute per key. Each UTC-minute quota is updated atomically in SQLite. Rate-limit headers are `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset`; HTTP 429 also includes `Retry-After`.
 
-    {
-      "seeds": ["https://www.example.com/"],
-      "max_pages": 5,
-      "max_depth": 1
-    }
+### Enable public mode
 
-Example response (abbreviated):
+Set these environment variables before starting the application:
 
-    {
-      "job": {
-        "id": "…",
-        "status": "pending",
-        "attempts": 0,
-        "seeds": ["https://www.example.com/"]
-      }
-    }
+- `APOKOLIPS_PUBLIC_MODE=true`
+- `APOKOLIPS_ADMIN_TOKEN` — secret with at least 32 characters; generate a new high-entropy value and keep it outside Git.
+- `APOKOLIPS_CORS_ORIGINS` — optional comma-separated exact browser origins.
+- `APOKOLIPS_DB_PATH` — optional persistent SQLite file path.
 
-The application starts one lightweight worker in its FastAPI lifespan. The worker claims jobs using a SQLite write transaction, stores a crawl-run record, crawls and indexes permitted pages, then marks the job completed. Failed attempts are retried up to three times with short exponential backoff. A 180-second lease allows a restarted application to recover jobs left running by a stopped worker. Pending jobs can be cancelled; running jobs cannot be cancelled via the API.
+Public mode fails startup if the administrator token is missing or too short. In public mode, the legacy unauthenticated `/search` route is disabled. Crawl operations, crawl job/history endpoints, and statistics require the administrator bearer token. The API-key administration endpoints always require that token.
 
-The queue is local and single-process. It is not a distributed queue or a recurring schedule service. Bind the API to localhost; do not expose the unauthenticated crawl endpoints publicly.
+### Key management
 
-## Search and storage
+- `POST /admin/api-keys` — create a key. JSON: `{"name":"My app","requests_per_minute":60}`.
+- `GET /admin/api-keys` — list metadata only.
+- `DELETE /admin/api-keys/{key_id}` — revoke a key.
 
-Search combines all supplied words (AND semantics). Title matches have a higher BM25 weight than description, headings, and body text. Search results always come from the local Apokolips index; the API does not proxy another search engine.
+Send `Authorization: Bearer YOUR_ADMIN_TOKEN`. The raw API key is returned only once. The database stores its SHA-256 hash, not the secret. Store the key in your server-side secret manager; do not commit it or embed it in browser JavaScript.
 
-Stop the API before copying the database file. SQLite WAL may use companion `-wal` and `-shm` files while the API is running. Keep `backend/data/` out of Git and back up the database according to the importance of the indexed content.
+Example search:
 
-## Run tests and lint
+    curl --get http://127.0.0.1:8000/api/v1/search ^
+      -H "X-API-Key: aps_live_your_key" ^
+      --data-urlencode "q=Apokolips search" ^
+      --data-urlencode "page=1" ^
+      --data-urlencode "page_size=10"
+
+See [Public API v1](../docs/public-api.md) for complete requests, response format, errors, and production checklist.
+
+## Crawler endpoints
+
+- `POST /crawl` — bounded synchronous crawl and indexing.
+- `POST /crawl/jobs` — queue a background crawl (HTTP 202).
+- `GET /crawl/jobs` and `GET /crawl/jobs/{job_id}` — job status.
+- `POST /crawl/jobs/{job_id}/cancel` — cancel pending jobs.
+- `GET /stats`, `GET /crawl/runs`, `GET /crawl/runs/{run_id}` — index and crawl operations.
+
+The worker uses a 180-second lease and retries failed jobs up to three times. The queue is local and single-process, not a distributed queue or recurring scheduler. For public deployment, use one API instance with a persistent database volume, HTTPS termination, and protected administrator configuration. Do not expose the unauthenticated local crawler mode to the internet.
+
+## Test and lint
 
     python -m pytest -q
     python -m ruff check app tests
 
-The test suite uses temporary databases and mocked crawler output; it does not initiate live external crawls.
-
-See `../crawler/README.md` and `../docs/local-development.md` for crawler policy and local setup.
+Tests use temporary SQLite databases and mocked crawler output; they do not initiate live external crawls.
