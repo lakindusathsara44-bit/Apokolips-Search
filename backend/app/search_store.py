@@ -113,6 +113,24 @@ class SearchStore:
                     ON crawl_url_state(status);
                 """
             )
+            fts_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(documents_fts)").fetchall()
+            }
+            rebuild_fts = not fts_columns
+            if fts_columns and "headings_json" not in fts_columns:
+                # Early development snapshots used a mismatched external-content
+                # column name. Recreate the FTS virtual table and rebuild it safely.
+                connection.executescript(
+                    """
+                    DROP TRIGGER IF EXISTS documents_ai;
+                    DROP TRIGGER IF EXISTS documents_ad;
+                    DROP TRIGGER IF EXISTS documents_au;
+                    DROP TABLE IF EXISTS documents_fts;
+                    """
+                )
+                rebuild_fts = True
+
             try:
                 connection.execute(
                     """
@@ -164,6 +182,10 @@ class SearchStore:
                 END;
                 """
             )
+            if rebuild_fts:
+                connection.execute(
+                    "INSERT INTO documents_fts(documents_fts) VALUES ('rebuild')"
+                )
 
     def create_crawl_run(self, seeds: list[str]) -> str:
         """Persist a crawl run as soon as it is accepted by the API."""
