@@ -14,3 +14,8 @@ venv/
 .DS_Store
 Thumbs.db
 *.log
+backend/data/
+*.sqlite
+*.sqlite3
+*.db-wal
+*.db-shm

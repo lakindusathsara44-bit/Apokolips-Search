@@ -1,26 +1,236 @@
-from fastapi import FastAPI
+"""FastAPI application for the Apokolips Search local development server."""
+
+from __future__ import annotations
+
+import asyncio
+import sqlite3
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 
-app = FastAPI(
-    title="Apokolips Search API",
-    version="0.1.0",
-    description="Local foundation API for the independent Apokolips Search engine.",
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
-    allow_credentials=False,
-    allow_methods=["GET"],
-    allow_headers=["*"],
-)
+from .crawl_queue import CrawlQueue
+from .crawl_worker import run_crawl_worker
+from .crawler import ApokolipsSpider, CrawlConfig
+from .search_store import SearchStore
 
 
-@app.get("/health", tags=["system"])
-async def health() -> dict[str, str]:
-    return {"status": "ok", "service": "apokolips-search-api", "version": "0.1.0"}
+class CrawlRequest(BaseModel):
+    seeds: list[str] = Field(min_length=1, max_length=10)
+    max_pages: int = Field(default=5, ge=1, le=25)
+    max_depth: int = Field(default=1, ge=0, le=3)
 
 
-@app.get("/", include_in_schema=False)
-async def root() -> dict[str, str]:
-    return {"message": "Apokolips Search API", "docs": "/docs"}
+class CrawlJobRequest(BaseModel):
+    seeds: list[str] = Field(min_length=1, max_length=10)
+    max_pages: int = Field(default=5, ge=1, le=25)
+    max_depth: int = Field(default=1, ge=0, le=3)
+
+
+def create_app(
+    search_store: SearchStore | None = None,
+    crawl_queue: CrawlQueue | None = None,
+) -> FastAPI:
+    """Application factory; tests may inject isolated database components."""
+    store = search_store or SearchStore()
+    queue = crawl_queue or CrawlQueue(store.database_path)
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        await asyncio.to_thread(store.initialize)
+        await asyncio.to_thread(queue.initialize)
+        worker_task = asyncio.create_task(run_crawl_worker(store, queue))
+        _app.state.crawl_worker_task = worker_task
+        try:
+            yield
+        finally:
+            worker_task.cancel()
+            await asyncio.gather(worker_task, return_exceptions=True)
+
+    api = FastAPI(
+        title="Apokolips Search API",
+        version="0.4.0",
+        description=(
+            "Independent local-first search API. Apokolips Spider discovers permitted "
+            "pages, SQLite stores crawl metadata and durable crawl jobs, and SQLite "
+            "FTS5 ranks the first-party index."
+        ),
+        lifespan=lifespan,
+    )
+    api.state.search_store = store
+    api.state.crawl_queue = queue
+
+    api.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
+        allow_credentials=False,
+        allow_methods=["GET", "POST"],
+        allow_headers=["Content-Type"],
+    )
+
+    @api.get("/health", tags=["system"])
+    def health() -> dict[str, str]:
+        try:
+            store.health()
+        except (OSError, RuntimeError, ValueError, sqlite3.Error):
+            raise HTTPException(status_code=503, detail="Search database is unavailable") from None
+        return {
+            "status": "ok",
+            "service": "apokolips-search-api",
+            "version": "0.4.0",
+            "database": "ready",
+            "index": "SQLite FTS5",
+        }
+
+    @api.get("/", include_in_schema=False)
+    def root() -> dict[str, str]:
+        return {
+            "message": "Apokolips Search API",
+            "docs": "/docs",
+            "search": "/search?q=your+query",
+            "crawl_jobs": "/crawl/jobs",
+        }
+
+    @api.post("/crawl", tags=["crawler"])
+    async def crawl(request: CrawlRequest) -> dict:
+        """Run a bounded crawl immediately and persist its extracted pages."""
+        run_id = await asyncio.to_thread(store.create_crawl_run, request.seeds)
+        spider = ApokolipsSpider(
+            CrawlConfig(
+                max_pages=request.max_pages,
+                max_depth=request.max_depth,
+            )
+        )
+        try:
+            report = await asyncio.wait_for(spider.crawl(request.seeds), timeout=120)
+            indexed_count = await asyncio.to_thread(
+                store.save_crawl_result,
+                run_id,
+                report,
+            )
+        except TimeoutError as exc:
+            await asyncio.to_thread(
+                store.fail_crawl_run,
+                run_id,
+                "Crawl exceeded the 120-second request limit",
+            )
+            raise HTTPException(
+                status_code=504,
+                detail="Crawl exceeded the 120-second request limit",
+            ) from exc
+        except ValueError as exc:
+            await asyncio.to_thread(store.fail_crawl_run, run_id, str(exc))
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:
+            await asyncio.to_thread(
+                store.fail_crawl_run,
+                run_id,
+                "The crawl or database operation failed",
+            )
+            raise HTTPException(
+                status_code=500,
+                detail="The crawl could not be completed. Check the crawl run record.",
+            ) from exc
+
+        return {
+            "status": "completed",
+            "run_id": run_id,
+            "processed_urls": report.processed_urls,
+            "discovered_urls": report.discovered_urls,
+            "indexed_pages": indexed_count,
+            "issue_count": len(report.issues),
+            "elapsed_seconds": report.elapsed_seconds,
+            "pages": [
+                {
+                    "url": page.url,
+                    "canonical_url": page.canonical_url,
+                    "title": page.title,
+                    "links_found": len(page.links),
+                }
+                for page in report.pages
+            ],
+            "issues": [
+                {"url": issue.url, "code": issue.code, "message": issue.message}
+                for issue in report.issues
+            ],
+            "persistence": "saved_to_local_database",
+        }
+
+    @api.post("/crawl/jobs", status_code=202, tags=["crawler"])
+    async def enqueue_crawl_job(request: CrawlJobRequest) -> dict:
+        """Queue a crawl to be processed in the background by Apokolips Spider."""
+        try:
+            job = await asyncio.to_thread(
+                queue.enqueue,
+                request.seeds,
+                request.max_pages,
+                request.max_depth,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {"job": job}
+
+    @api.get("/crawl/jobs", tags=["crawler"])
+    async def crawl_jobs(
+        limit: int = Query(default=20, ge=1, le=100),
+    ) -> dict:
+        jobs = await asyncio.to_thread(queue.list_jobs, limit)
+        return {"jobs": jobs}
+
+    @api.get("/crawl/jobs/{job_id}", tags=["crawler"])
+    async def crawl_job(job_id: str) -> dict:
+        job = await asyncio.to_thread(queue.get_job, job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Crawl job not found")
+        return {"job": job}
+
+    @api.post("/crawl/jobs/{job_id}/cancel", tags=["crawler"])
+    async def cancel_crawl_job(job_id: str) -> dict:
+        job = await asyncio.to_thread(queue.get_job, job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Crawl job not found")
+        cancelled = await asyncio.to_thread(queue.cancel_pending, job_id)
+        if not cancelled:
+            raise HTTPException(
+                status_code=409,
+                detail="Only pending crawl jobs can be cancelled",
+            )
+        updated_job = await asyncio.to_thread(queue.get_job, job_id)
+        return {"job": updated_job}
+
+    @api.get("/search", tags=["search"])
+    def search(
+        q: str = Query(min_length=1, max_length=200, description="Search terms"),
+        page: int = Query(default=1, ge=1, le=10_000),
+        page_size: int = Query(default=10, ge=1, le=50),
+    ) -> dict:
+        """Search only Apokolips' own SQLite FTS5 index using weighted BM25 ranking."""
+        try:
+            return store.search(q, page=page, page_size=page_size)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @api.get("/stats", tags=["system"])
+    def stats() -> dict:
+        """Return local index and crawl statistics."""
+        return store.get_stats()
+
+    @api.get("/crawl/runs", tags=["crawler"])
+    def crawl_runs(
+        limit: int = Query(default=20, ge=1, le=100),
+    ) -> dict:
+        return {"runs": store.list_crawl_runs(limit=limit)}
+
+    @api.get("/crawl/runs/{run_id}", tags=["crawler"])
+    def crawl_run(run_id: str) -> dict:
+        run = store.get_crawl_run(run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="Crawl run not found")
+        return run
+
+    return api
+
+
+app = create_app()
