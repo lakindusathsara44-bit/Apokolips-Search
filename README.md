@@ -1,23 +1,24 @@
 # Apokolips Search
 
-An independent web search engine project by Apokolips. The search results shown by this project are sourced from its own crawler and local index, not from another search provider.
+An independent web search engine by Apokolips. Search results come from its own crawler and first-party index, not from another search provider.
 
 ## Current status
 
-**Phase 04 — Durable background crawl queue and worker reliability.**
+**Phase 05 — Public Search API v1.**
 
 - Phase 01: React + Vite + TypeScript frontend and FastAPI foundation.
 - Phase 02: Apokolips Spider crawler with robots.txt policy checks, sitemap discovery, safe URL handling, and bounded fetching.
-- Phase 03: SQLite crawl metadata, SQLite FTS5 indexing, weighted BM25 ranking, search API, and connected React results page.
-- Phase 04: SQLite-backed crawl job queue, background worker, atomic job claiming, worker leases, restart recovery, bounded retries, and job status/cancellation endpoints.
+- Phase 03: SQLite crawl metadata, FTS5 indexing, weighted BM25 ranking, search API, and connected React results page.
+- Phase 04: durable SQLite crawl queue, background worker, leases, restart recovery, retries, and job management.
+- Phase 05: API-key authenticated public search endpoint, per-key rate limits, administrator-only key management, public-mode protections, and developer documentation.
 
 ## Project structure
 
-- frontend/ — React + Vite search experience
-- backend/ — FastAPI API, Apokolips Spider, SQLite store/queue, background worker, and FTS5 search index
-- crawler/ — crawler behaviour and operating documentation
-- indexer/ — future standalone indexing pipeline
-- docs/ — architecture and local setup
+- `frontend/` — React + Vite search experience
+- `backend/` — FastAPI API, crawler, SQLite store/queue, API-key management, and FTS5 index
+- `crawler/` — crawler behaviour and operating documentation
+- `indexer/` — future standalone indexing pipeline
+- `docs/` — architecture, local setup, and public API documentation
 
 ## Quick start
 
@@ -40,30 +41,31 @@ In a second terminal:
 
 Open http://127.0.0.1:5173. API documentation is at http://127.0.0.1:8000/docs.
 
-## Main endpoints
+## Public Search API v1
 
-- POST /crawl — run a bounded crawl immediately and persist results.
-- POST /crawl/jobs — enqueue a bounded crawl for background processing; returns HTTP 202.
-- GET /crawl/jobs — list recent crawl jobs.
-- GET /crawl/jobs/{job_id} — inspect a job and its current state.
-- POST /crawl/jobs/{job_id}/cancel — cancel a job only while it is pending.
-- GET /search?q=... — search the local Apokolips index with BM25 ranking.
-- GET /stats — database and index statistics.
-- GET /crawl/runs — recent crawl history.
-- GET /crawl/runs/{run_id} — one crawl run's status and metrics.
-- GET /health — API, database, and FTS5 health check.
+- `GET /api/v1/search?q=...` — public search over the Apokolips first-party index; requires `X-API-Key`.
+- `POST /admin/api-keys` — create a developer key (administrator bearer token required).
+- `GET /admin/api-keys` — list key metadata without secrets.
+- `DELETE /admin/api-keys/{key_id}` — revoke a key.
+- `GET /health` — API and search database health.
 
-The queue and search index share the SQLite database created at backend/data/apokolips-search.sqlite3. Set APOKOLIPS_DB_PATH to choose another local path. The database is application data and is excluded from Git.
+New developer keys default to 60 requests/minute; administrators may set 1–600 requests/minute. API keys are high-entropy random secrets; only SHA-256 hashes are stored and the complete key is shown once. See [Public API v1 documentation](docs/public-api.md) for authentication, examples, rate-limit headers, and deployment configuration.
 
-## Background queue behaviour
+Set `APOKOLIPS_PUBLIC_MODE=true` and a unique `APOKOLIPS_ADMIN_TOKEN` (at least 32 characters) before deploying publicly. In public mode, crawler operations and operational endpoints require the administrator token, and the old unauthenticated `/search` route is disabled. Configure exact browser origins with `APOKOLIPS_CORS_ORIGINS`. Never expose keys in frontend code or commit secrets.
 
-The API starts one lightweight worker when the application starts. Jobs are claimed atomically in SQLite, have a 180-second worker lease, and are recovered after an application restart. Failed jobs use bounded retries (three attempts by default) with short exponential backoff. A pending job can be cancelled; a running job cannot be force-stopped through the HTTP API. The direct POST /crawl endpoint remains available.
+## Crawler and local index
 
-This is a local, single-process queue, not a distributed worker service or recurring cron scheduler. Keep the API bound to localhost and do not expose unauthenticated crawl-control endpoints publicly.
+- `POST /crawl` — run a bounded crawl immediately.
+- `POST /crawl/jobs` — enqueue a background crawl (HTTP 202).
+- `GET /crawl/jobs` and `GET /crawl/jobs/{job_id}` — inspect job state.
+- `POST /crawl/jobs/{job_id}/cancel` — cancel a pending job.
+- `GET /stats`, `GET /crawl/runs`, and `GET /crawl/runs/{run_id}` — operational data (administrator-only in public mode).
 
-## Search design
+The database is created at `backend/data/apokolips-search.sqlite3`; override it with `APOKOLIPS_DB_PATH`. Keep the database on persistent storage when hosted. The initial public deployment model is a single API instance using one persistent SQLite database; it is not yet a distributed or horizontally scaled service.
 
-The current local implementation uses SQLite FTS5 with Unicode tokenization and weighted BM25 field ranking: title 20, description 3, headings 5, and body 1. Search terms use AND semantics and results are paginated. Image, video, and news search verticals are not implemented yet.
+## Search design and current limits
+
+SQLite FTS5 provides Unicode full-text matching and weighted BM25 ranking: title 20, description 3, headings 5, body 1. Search terms use AND semantics. The index contains only pages that Apokolips has actually crawled and stored; it is not a copy of the entire web. Image, video, and news search are not implemented.
 
 ## Validation
 
@@ -71,4 +73,4 @@ GitHub Actions checks Python 3.11 and 3.12 (Ruff plus backend tests) and builds 
 
 ## Responsible crawling
 
-Respect robots.txt, applicable site terms, access restrictions, and publisher preferences. Use the crawler only on sites you are authorized to crawl. It does not bypass authentication, paywalls, CAPTCHAs, or technical restrictions. See crawler/README.md for its limits.
+Respect robots.txt, applicable site terms, access restrictions, and publisher preferences. Crawl only sites you are authorized to crawl. Do not bypass authentication, paywalls, CAPTCHAs, or technical restrictions. See [crawler documentation](crawler/README.md).
