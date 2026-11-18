@@ -10,7 +10,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Iterator
+from collections.abc import Iterable, Iterator
 
 from .crawler.parsing import ExtractedDocument
 from .crawler.spider import CrawlIssue, CrawlReport
