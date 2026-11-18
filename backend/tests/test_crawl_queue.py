@@ -109,9 +109,9 @@ def test_only_pending_jobs_can_be_cancelled(tmp_path) -> None:
     store.initialize()
     queue = CrawlQueue(store.database_path)
     queue.initialize()
-    pending = queue.enqueue(["https://example.com/pending"])
     running = queue.enqueue(["https://example.com/running"])
     queue.claim_next_job("worker-one")
+    pending = queue.enqueue(["https://example.com/pending"])
 
     assert queue.cancel_pending(pending["id"]) is True
     assert queue.get_job(pending["id"])["status"] == "cancelled"
