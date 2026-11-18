@@ -2,6 +2,7 @@ import pytest
 
 from app.crawler.parsing import extract_html, extract_sitemap_urls, parse_robots
 
+
 def test_extract_html_metadata_text_and_links() -> None:
     html = b"""
     <html lang="en">
