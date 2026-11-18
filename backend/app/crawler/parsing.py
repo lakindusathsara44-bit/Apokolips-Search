@@ -5,8 +5,7 @@ import hashlib
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from urllib.parse import urljoin
-from urllib.robotparser import RobotFileParser
+from urllib.parse import urljoin, urlsplit
 
 from bs4 import BeautifulSoup
 
@@ -15,6 +14,7 @@ from .safety import UnsafeTargetError, normalize_url
 MAX_PAGE_TEXT_CHARS = 60_000
 MAX_LINKS_PER_PAGE = 300
 MAX_SITEMAP_URLS = 1_000
+
 
 @dataclass(frozen=True, slots=True)
 class ExtractedDocument:
@@ -28,27 +28,114 @@ class ExtractedDocument:
     content_hash: str
     links: tuple[str, ...]
 
-def parse_robots(robots_url: str, body: str) -> tuple[RobotFileParser, list[str]]:
-    """Parse robots.txt and return its parser plus valid Sitemap directives."""
-    parser = RobotFileParser()
-    parser.set_url(robots_url)
-    parser.parse(body.splitlines())
-    sitemap_urls: list[str] = []
-    for line in body.splitlines():
-        key, separator, value = line.partition(":")
-        if separator and key.strip().lower() == "sitemap":
-            candidate = value.strip()
-            if not candidate:
+
+@dataclass(frozen=True, slots=True)
+class RobotsRules:
+    """robots.txt matcher using longest-match precedence and Allow tie-breaks."""
+
+    groups: tuple[tuple[tuple[str, ...], tuple[tuple[bool, str], ...]], ...]
+
+    @staticmethod
+    def _matches(pattern: str, target: str) -> bool:
+        end_anchored = pattern.endswith("$")
+        pattern_body = pattern[:-1] if end_anchored else pattern
+        expression = "".join(
+            ".*" if char == "*" else re.escape(char)
+            for char in pattern_body
+        )
+        expression += "$" if end_anchored else ".*"
+        return re.match(expression, target) is not None
+
+    def can_fetch(self, user_agent: str, url: str) -> bool:
+        """Return whether the best-matching robots rule permits the URL."""
+        product = user_agent.split("/", 1)[0].strip().casefold()
+        matching_groups: list[
+            tuple[tuple[str, ...], tuple[tuple[bool, str], ...]]
+        ] = []
+        best_agent_length = -1
+
+        for agents, rules in self.groups:
+            matching_agents = [
+                agent for agent in agents
+                if agent == "*" or (agent and agent in product)
+            ]
+            if not matching_agents:
                 continue
+            specificity = max(
+                0 if agent == "*" else len(agent)
+                for agent in matching_agents
+            )
+            if specificity > best_agent_length:
+                best_agent_length = specificity
+                matching_groups = [(agents, rules)]
+            elif specificity == best_agent_length:
+                matching_groups.append((agents, rules))
+
+        if best_agent_length < 0:
+            return True
+
+        parts = urlsplit(url)
+        target = parts.path or "/"
+        if parts.query:
+            target += "?" + parts.query
+
+        matched_rules: list[tuple[int, bool]] = []
+        for _agents, rules in matching_groups:
+            for allowed, pattern in rules:
+                if self._matches(pattern, target):
+                    specificity = len(pattern.replace("*", "").removesuffix("$"))
+                    matched_rules.append((specificity, allowed))
+
+        if not matched_rules:
+            return True
+
+        longest = max(specificity for specificity, _allowed in matched_rules)
+        return any(
+            allowed
+            for specificity, allowed in matched_rules
+            if specificity == longest
+        )
+
+
+def parse_robots(robots_url: str, body: str) -> tuple[RobotsRules, list[str]]:
+    """Parse robots.txt and return its rule matcher plus valid Sitemap directives."""
+    groups: list[tuple[tuple[str, ...], tuple[tuple[bool, str], ...]]] = []
+    agents: list[str] = []
+    rules: list[tuple[bool, str]] = []
+    sitemap_urls: list[str] = []
+
+    for raw_line in body.splitlines():
+        line = raw_line.split("#", 1)[0].strip()
+        if not line or ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        key = key.strip().casefold()
+        value = value.strip()
+
+        if key == "user-agent":
+            if rules and agents:
+                groups.append((tuple(agents), tuple(rules)))
+                agents = []
+                rules = []
+            if value:
+                agents.append(value.casefold())
+        elif key in {"allow", "disallow"} and agents:
+            # An empty Disallow means that no path is disallowed.
+            if value:
+                rules.append((key == "allow", value))
+        elif key == "sitemap" and value and len(sitemap_urls) < 20:
             try:
-                normalized = normalize_url(urljoin(robots_url, candidate))
+                normalized = normalize_url(urljoin(robots_url, value))
             except UnsafeTargetError:
                 continue
             if normalized not in sitemap_urls:
                 sitemap_urls.append(normalized)
-            if len(sitemap_urls) >= 20:
-                break
-    return parser, sitemap_urls
+
+    if agents:
+        groups.append((tuple(agents), tuple(rules)))
+
+    return RobotsRules(tuple(groups)), sitemap_urls
+
 
 def extract_html(html: bytes, page_url: str) -> ExtractedDocument:
     """Extract useful page text and safe outgoing links from HTML bytes."""
@@ -61,7 +148,10 @@ def extract_html(html: bytes, page_url: str) -> ExtractedDocument:
     title_node = soup.find("title")
     title = title_node.get_text(" ", strip=True)[:500] if title_node else ""
     description = ""
-    description_node = soup.find("meta", attrs={"name": re.compile(r"^description$", re.IGNORECASE)})
+    description_node = soup.find(
+        "meta",
+        attrs={"name": re.compile(r"^description$", re.IGNORECASE)},
+    )
     if description_node and description_node.get("content"):
         description = str(description_node["content"]).strip()[:1000]
 
@@ -101,10 +191,17 @@ def extract_html(html: bytes, page_url: str) -> ExtractedDocument:
             break
 
     return ExtractedDocument(
-        url=page_url, canonical_url=canonical_url, title=title,
-        description=description, language=language, headings=tuple(headings),
-        text=text, content_hash=content_hash, links=tuple(links),
+        url=page_url,
+        canonical_url=canonical_url,
+        title=title,
+        description=description,
+        language=language,
+        headings=tuple(headings),
+        text=text,
+        content_hash=content_hash,
+        links=tuple(links),
     )
+
 
 def extract_sitemap_urls(xml_body: bytes) -> list[str]:
     """Extract bounded <loc> entries from an XML sitemap or sitemap index."""
