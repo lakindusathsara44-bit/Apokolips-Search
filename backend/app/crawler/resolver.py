@@ -4,6 +4,7 @@ from aiohttp.resolver import DefaultResolver
 
 from .safety import validate_resolved_addresses
 
+
 class PublicOnlyResolver(AbstractResolver):
     """Resolve hostnames and reject the whole answer if any address is non-public."""
     def __init__(self) -> None:
