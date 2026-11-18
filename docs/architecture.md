@@ -2,18 +2,20 @@
 
 ## Goals
 
-Build an independent search engine with its own crawler, index, ranking, and user-facing search API. Search results must come from Apokolips' own index, not be presented from a third-party search API.
+Build an independent search engine with its own crawler, index, ranking, and public developer API. Search results come from Apokolips' own index, not from a third-party search API.
 
 ## Logical flow
 
 1. Discovery: Apokolips Spider discovers public URLs from seed lists, robots.txt sitemap directives, XML sitemaps, and page links.
 2. Policy and fetch: the crawler checks robots.txt, applies per-host rate limits, restricts outbound destinations to globally routable addresses, and applies request/response limits.
 3. Extraction: HTML title, description, canonical URL, language, headings, body text, and links are extracted.
-4. Persistence: crawl runs, per-URL states, and normalized documents are stored in a local SQLite database.
+4. Persistence: crawl runs, per-URL states, normalized documents, API-key hashes, and usage buckets are stored in SQLite.
 5. Queueing: crawl requests are persisted as jobs and atomically claimed by a background worker using SQLite transactions and short-lived leases.
 6. Indexing: SQLite FTS5 maintains a full-text index.
-7. Search: the FastAPI endpoint sanitizes user input and ranks local-index matches with weighted BM25.
-8. Frontend: the React search page calls the local API, displays ranked results, and supports pagination.
+7. Search: FastAPI sanitizes query input and ranks local-index matches with weighted BM25.
+8. Public access: `GET /api/v1/search` authenticates a high-entropy API key, atomically consumes its per-minute quota, and returns paginated JSON.
+9. Administration: a separate administrator bearer token controls key creation/revocation and protects crawler/operational endpoints in public mode.
+10. Frontend: the React search page calls the local search API, displays ranked results, and supports pagination.
 
 ## Phase status
 
@@ -21,35 +23,37 @@ Build an independent search engine with its own crawler, index, ranking, and use
 - Phase 02: bounded Apokolips Spider crawler, robots.txt and sitemap handling, HTML extraction, safe URL validation, per-host throttling, response limits, and tests.
 - Phase 03: durable SQLite crawl metadata, URL state tracking, FTS5 indexing, weighted BM25 search API, frontend integration, and database/API tests.
 - Phase 04: durable SQLite crawl jobs, one background worker per API process, atomic claims, 180-second leases, restart recovery, bounded retries, status queries, and pending-job cancellation.
+- Phase 05: public Search API v1, hashed API keys, per-key fixed UTC-minute quotas, admin-only key management, public-mode crawler protections, and developer documentation.
 
 ## Local-first data architecture
 
-SQLite is deliberately used for the first local implementation. It keeps the installation lightweight and avoids requiring PostgreSQL, Redis, Java, or a separate OpenSearch service on the development laptop. The FTS5 engine is built into supported SQLite builds and provides full-text matching and BM25 ranking.
+SQLite keeps installation lightweight and avoids requiring PostgreSQL, Redis, Java, or a separate OpenSearch service for local development. FTS5 provides full-text matching and BM25 ranking. The default database is `backend/data/apokolips-search.sqlite3`; set `APOKOLIPS_DB_PATH` to another path. SQLite WAL mode and a busy timeout support local reads and writes. The database is excluded from Git.
 
-The database is stored at `backend/data/apokolips-search.sqlite3` by default. Set `APOKOLIPS_DB_PATH` to use another local path. SQLite WAL mode and a busy timeout support reliable local reads and writes. The database is excluded from Git.
-
-The search index is maintained by SQLite triggers when document rows are inserted, updated, or deleted. Ranking weights favour titles, then headings, descriptions, and body text. The first release uses AND semantics across query terms for predictable matching.
+The search index is maintained by SQLite triggers when document rows are inserted, updated, or deleted. Ranking weights favour titles, then headings, descriptions, and body text. The first release uses AND semantics across query terms.
 
 ## Queue reliability model
 
-The `crawl_jobs` table is stored in the same database as the search index. Workers claim one pending job inside a `BEGIN IMMEDIATE` transaction so two local worker loops cannot claim the same pending row. Each claim has a 180-second lease. If a worker disappears or the application restarts, expired/in-flight jobs are returned to the pending queue while attempts remain, otherwise they become terminal failures. The default maximum is three attempts with short exponential backoff. A pending job can be cancelled; in-progress cancellation is intentionally not advertised.
+The `crawl_jobs` table shares the search database. Workers claim one pending job inside a `BEGIN IMMEDIATE` transaction. Each claim has a 180-second lease. Interrupted jobs are recovered after restart while attempts remain; otherwise they become terminal failures. The default maximum is three attempts with short exponential backoff. A pending job can be cancelled.
 
-The worker applies the same bounded crawler configuration as the synchronous endpoint: at most 25 pages per job, depth at most 3, and a 120-second crawl timeout. Crawler policy and network-safety checks are shared; the queue does not bypass robots.txt or other crawler protections.
+The worker uses the bounded crawler configuration: at most 25 pages per job, depth at most 3, and a 120-second crawl timeout. Crawler policy and network-safety checks are shared; the queue does not bypass robots.txt or other protections.
 
-This is a local single-process service with SQLite persistence, not a distributed queue, public multi-tenant service, or recurring cron scheduler. The API should remain bound to localhost until authentication, quotas, and abuse controls are added.
+## Public API security model
 
-## Current limitations
+The public API exposes search only. Each developer key is generated from cryptographically secure randomness, prefixed `aps_live_`, and returned once. SQLite stores only its SHA-256 hash and non-secret metadata. Keys have independent per-minute quotas (default 60; configurable from 1 to 600). Quota increments occur inside a SQLite write transaction to prevent concurrent requests from exceeding the same window. Revocation takes effect on the next request.
 
-- The worker processes one job at a time per API process; no multi-worker deployment or external broker is configured.
-- Jobs are request-driven; recurring scheduled crawls are not implemented.
-- The local search index contains only pages that have actually been crawled and stored. It is not a copy of the entire web.
-- Web search is connected to the local index. Image, video, and news verticals are planned separately.
-- Advanced ranking signals, language-specific analysis, link graph scoring, and spam-quality systems need evaluation datasets before adoption.
-- SQLite is a practical local foundation. A multi-user production service can later migrate persistence and indexing to PostgreSQL/OpenSearch without changing the product goal.
+Administrator operations use `Authorization: Bearer` and the `APOKOLIPS_ADMIN_TOKEN` environment variable. Public mode requires a token of at least 32 characters. In public mode the old unmetered `/search` endpoint is disabled and crawler submissions, job inspection/cancellation, crawl history, and statistics are administrator-only. API key management is administrator-only in every mode.
+
+CORS allows only explicit origins configured in `APOKOLIPS_CORS_ORIGINS`; wildcard origins are ignored. CORS is not an authentication mechanism. Public API keys must not be embedded in client-side JavaScript or committed to source control. Public deployments must terminate HTTPS and keep the admin token in a secret manager.
+
+## Deployment boundary and limitations
+
+This implementation adds the public API contract and access controls; it does not by itself host a live public service. The current database, worker, and fixed-window quota storage are designed for a single API instance with one persistent SQLite database. Do not horizontally scale independent instances or use ephemeral storage. A production multi-instance service will require shared transactional storage, coordinated worker infrastructure, stronger operational monitoring, and abuse controls.
+
+The index contains only pages actually crawled and stored. It is not a copy of the entire web. Image, video, and news verticals are planned separately. Advanced ranking signals need evaluation datasets before adoption.
 
 ## Responsible crawling and privacy
 
-Respect robots.txt, applicable terms and access controls, per-host rate limits, and publisher crawl preferences. Identify the crawler clearly. Do not bypass authentication, paywalls, CAPTCHAs, or technical restrictions. Reject loopback, private, link-local, and other non-public IP destinations at DNS resolution time, including mixed public/private DNS answers. Revalidate redirect destinations. Limit response sizes and content types. Retain only data needed for search and operations. Avoid collecting sensitive personal data. Provide a removal/contact process and honour valid publisher requests.
+Respect robots.txt, applicable terms and access controls, per-host rate limits, and publisher preferences. Do not bypass authentication, paywalls, CAPTCHAs, or technical restrictions. Reject private and non-public network destinations, revalidate redirects, and limit response sizes/content types. Retain only data needed for search and operations. Avoid collecting sensitive personal data and provide a removal/contact process.
 
 ## Ranking principles
 
