@@ -1,8 +1,10 @@
 """FastAPI application for the Apokolips Search local development server."""
 import asyncio
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+
 from .crawler import ApokolipsSpider, CrawlConfig
 
 app = FastAPI(
@@ -43,7 +45,7 @@ async def crawl(request: CrawlRequest) -> dict:
     ))
     try:
         report = await asyncio.wait_for(spider.crawl(request.seeds), timeout=120)
-    except asyncio.TimeoutError as exc:
+    except TimeoutError as exc:
         raise HTTPException(
             status_code=504, detail="Crawl exceeded the 120-second request limit"
         ) from exc
