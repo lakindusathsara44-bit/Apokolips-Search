@@ -187,6 +187,18 @@ class SearchStore:
                     "INSERT INTO documents_fts(documents_fts) VALUES ('rebuild')"
                 )
 
+            # A process restart cannot resume an in-flight HTTP crawl. Mark it
+            # failed instead of exposing an orphaned "running" record forever.
+            connection.execute(
+                """
+                UPDATE crawl_runs
+                SET finished_at = ?, status = 'failed',
+                    error_message = 'Server restarted before the crawl completed'
+                WHERE status = 'running'
+                """,
+                (utc_now(),),
+            )
+
     def create_crawl_run(self, seeds: list[str]) -> str:
         """Persist a crawl run as soon as it is accepted by the API."""
         run_id = uuid.uuid4().hex
