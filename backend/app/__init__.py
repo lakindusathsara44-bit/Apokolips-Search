@@ -1,1 +1,0 @@
-"""Apokolips Search API package."""
