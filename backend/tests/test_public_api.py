@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 from app.api_access import APIKeyStore
+from app.crawl_queue import CrawlQueue
 from app.crawler.parsing import ExtractedDocument
 from app.main import create_app
 from app.search_store import SearchStore
@@ -219,7 +220,9 @@ def test_public_mode_hides_legacy_search_and_protects_crawler_controls(
     search = make_search_store(tmp_path)
     keys = APIKeyStore(search.database_path)
     keys.initialize()
-    app = create_app(search, api_key_store=keys)
+    queue = CrawlQueue(search.database_path)
+    queue.initialize()
+    app = create_app(search, queue, keys)
 
     legacy_search = api_request(app, "GET", "/search", params={"q": "Apokolips"})
     crawl = api_request(
