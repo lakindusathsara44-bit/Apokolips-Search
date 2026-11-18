@@ -7,17 +7,17 @@ import os
 import re
 import sqlite3
 import uuid
-from contextlib import contextmanager
-from datetime import datetime, timezone
-from pathlib import Path
 from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
+from datetime import UTC, datetime
+from pathlib import Path
 
 from .crawler.parsing import ExtractedDocument
-from .crawler.spider import CrawlIssue, CrawlReport
+from .crawler.spider import CrawlReport
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def build_fts_query(query: str) -> str:
