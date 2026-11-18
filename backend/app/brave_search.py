@@ -5,7 +5,6 @@ Search responses are normalized in memory and are never written to the local ind
 
 from __future__ import annotations
 
-import asyncio
 import math
 import os
 import threading
@@ -15,7 +14,6 @@ from urllib.parse import urlsplit
 import aiohttp
 
 BRAVE_WEB_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
-
 
 class SearchProviderError(RuntimeError):
     """Base error for an upstream search provider failure."""
