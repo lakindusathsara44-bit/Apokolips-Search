@@ -11,26 +11,21 @@ import {
   Video,
 } from "lucide-react";
 
-type SearchResult = {
-  id: number;
-  url: string;
-  canonical_url: string;
+type WebSearchResult = {
   title: string;
+  url: string;
+  display_url: string;
   description: string;
-  language: string;
-  snippet: string;
-  relevance_score: number;
-  last_crawled_at: string;
 };
 
-type SearchResponse = {
+type WebSearchResponse = {
+  provider: string;
   query: string;
-  total_results: number;
   page: number;
   page_size: number;
-  total_pages: number;
+  result_count: number;
   has_more: boolean;
-  results: SearchResult[];
+  results: WebSearchResult[];
 };
 
 const categories = [
@@ -55,11 +50,10 @@ export default function App() {
   const [category, setCategory] = useState("Web");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
-  const [results, setResults] = useState<SearchResult[]>([]);
+  const [results, setResults] = useState<WebSearchResult[]>([]);
   const [searchedQuery, setSearchedQuery] = useState("");
-  const [totalResults, setTotalResults] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
 
   async function runSearch(nextPage = 1) {
@@ -69,7 +63,7 @@ export default function App() {
       return;
     }
     if (category !== "Web") {
-      setNotice(category + " search is planned for a later phase. Web search uses Apokolips' local index.");
+      setNotice(category + " search is planned for a later phase.");
       return;
     }
 
@@ -81,29 +75,29 @@ export default function App() {
         page: String(nextPage),
         page_size: "10",
       });
-      const response = await fetch(API_BASE_URL + "/search?" + params.toString());
-      const payload = await response.json();
+      const response = await fetch(
+        API_BASE_URL + "/api/v1/web-search?" + params.toString(),
+        { headers: { Accept: "application/json" } },
+      );
+      const payload: unknown = await response.json().catch(() => ({}));
+      const data = payload as Partial<WebSearchResponse> & { detail?: string };
 
       if (!response.ok) {
-        const detail = typeof payload.detail === "string" ? payload.detail : "Search request failed.";
-        throw new Error(detail);
+        throw new Error(data.detail || "Search request failed.");
       }
 
-      const data = payload as SearchResponse;
-      setResults(data.results);
-      setSearchedQuery(data.query);
-      setTotalResults(data.total_results);
-      setCurrentPage(data.page);
-      setTotalPages(data.total_pages);
+      setResults(Array.isArray(data.results) ? data.results : []);
+      setSearchedQuery(data.query || term);
+      setCurrentPage(data.page || nextPage);
+      setHasMore(Boolean(data.has_more));
       setHasSearched(true);
     } catch (error) {
       setResults([]);
-      setTotalResults(0);
-      setTotalPages(0);
+      setHasMore(false);
       setHasSearched(false);
       setNotice(
         error instanceof Error
-          ? error.message + " Check that the Apokolips Search API is running at " + API_BASE_URL + "."
+          ? error.message + " Check the Apokolips Search API configuration."
           : "Could not connect to the Apokolips Search API.",
       );
     } finally {
@@ -122,14 +116,14 @@ export default function App() {
         <a className="brand-small" href="/" aria-label="Apokolips Search home">
           <span className="brand-mark">A</span> APOKOLIPS
         </a>
-        <span className="status"><i /> LOCAL INDEX SEARCH</span>
+        <span className="status"><i /> LEVEL 1 · WEB SEARCH</span>
       </header>
 
       <section className="hero">
-        <div className="eyebrow"><span /> INDEPENDENT WEB DISCOVERY</div>
+        <div className="eyebrow"><span /> WEB DISCOVERY</div>
         <div className="wordmark"><span>APOKOLIPS</span><strong>SEARCH</strong></div>
         <p className="tagline">Explore. Discover. Connect.</p>
-        <p className="intro">A new path to the web, built on our own search technology.</p>
+        <p className="intro">Search the web with results from a global search index.</p>
 
         <form className="search-form" onSubmit={submitSearch}>
           <Search size={20} aria-hidden="true" />
@@ -138,7 +132,7 @@ export default function App() {
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search the web..."
             aria-label="Search the web"
-            maxLength={200}
+            maxLength={600}
           />
           <button
             className="voice-button"
@@ -165,6 +159,8 @@ export default function App() {
                 setNotice(label === "Web" ? "" : label + " search is planned for a later phase.");
               }}
               type="button"
+              disabled={label !== "Web"}
+              title={label === "Web" ? "Search web pages" : label + " search — coming later"}
             >
               <Icon size={16} /> {label}
             </button>
@@ -178,10 +174,10 @@ export default function App() {
         <section className="results-section" aria-live="polite">
           <div className="results-heading">
             <div>
-              <p className="results-eyebrow">APOKOLIPS INDEX</p>
+              <p className="results-eyebrow">WEB SEARCH RESULTS</p>
               <h1>Results for <span>“{searchedQuery}”</span></h1>
               <p className="results-count">
-                {totalResults.toLocaleString()} {totalResults === 1 ? "result" : "results"} from the local index
+                {results.length.toLocaleString()} {results.length === 1 ? "result" : "results"} on this page
               </p>
             </div>
           </div>
@@ -189,27 +185,29 @@ export default function App() {
           {results.length > 0 ? (
             <div className="results-list">
               {results.map((result) => (
-                <article className="result-card" key={result.id}>
-                  <div className="result-domain"><Globe2 size={13} /> {getDomain(result.canonical_url)}</div>
+                <article className="result-card" key={result.url}>
+                  <div className="result-domain"><Globe2 size={13} /> {result.display_url || getDomain(result.url)}</div>
                   <h2>
-                    <a href={result.url} target="_blank" rel="noreferrer">
-                      {result.title || result.canonical_url}
+                    <a href={result.url} target="_blank" rel="noopener noreferrer">
+                      {result.title || result.url}
                     </a>
                   </h2>
-                  <p className="result-url">{result.canonical_url}</p>
-                  <p className="result-snippet">{result.snippet || result.description || "No description is available for this page."}</p>
+                  <p className="result-url">{result.url}</p>
+                  <p className="result-snippet">
+                    {result.description || "No description is available for this page."}
+                  </p>
                 </article>
               ))}
             </div>
           ) : (
             <div className="empty-results">
               <Search size={23} />
-              <h2>No matching pages found</h2>
-              <p>Try different words, or crawl a public website to add pages to the Apokolips index.</p>
+              <h2>No results found</h2>
+              <p>Try a different search phrase or check the spelling of your query.</p>
             </div>
           )}
 
-          {totalPages > 1 && (
+          {(currentPage > 1 || hasMore) && (
             <div className="pagination">
               <button
                 type="button"
@@ -218,11 +216,11 @@ export default function App() {
               >
                 <ArrowLeft size={15} /> Previous
               </button>
-              <span>Page {currentPage} of {totalPages}</span>
+              <span>Page {currentPage}</span>
               <button
                 type="button"
                 onClick={() => void runSearch(currentPage + 1)}
-                disabled={loading || currentPage >= totalPages}
+                disabled={loading || !hasMore || currentPage >= 10}
               >
                 Next <ArrowRight size={15} />
               </button>
@@ -232,14 +230,14 @@ export default function App() {
       )}
 
       <section className="principles" aria-label="Project principles">
-        <article><span className="principle-number">01</span><h2>Our own index</h2><p>Build a first-party web index with a crawler and document pipeline.</p></article>
-        <article><span className="principle-number">02</span><h2>Useful by design</h2><p>Prioritise relevant, clear results and transparent ranking signals.</p></article>
-        <article><span className="principle-number">03</span><h2>Respect the web</h2><p>Crawl responsibly, honour site policies and protect user privacy.</p></article>
+        <article><span className="principle-number">01</span><h2>Web-wide discovery</h2><p>Explore relevant pages from a large independent web index.</p></article>
+        <article><span className="principle-number">02</span><h2>Simple by design</h2><p>Clear titles, source addresses and concise descriptions.</p></article>
+        <article><span className="principle-number">03</span><h2>Built in stages</h2><p>Images, video, news and Apokolips’ own index can follow in later phases.</p></article>
       </section>
 
       <footer>
         <span>© {new Date().getFullYear()} Apokolips Search</span>
-        <span>Independent search technology · In development</span>
+        <span>Level 1 · Basic web search · In development</span>
       </footer>
     </main>
   );
