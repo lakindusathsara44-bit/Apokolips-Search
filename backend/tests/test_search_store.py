@@ -10,6 +10,19 @@ from app.main import create_app
 from app.search_store import SearchStore, build_fts_query
 
 
+
+def api_request(app, method: str, path: str, **kwargs):
+    async def send_request():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+        ) as client:
+            return await client.request(method, path, **kwargs)
+
+    return asyncio.run(send_request())
+
+
 def make_page(
     *,
     url: str,
@@ -195,10 +208,9 @@ def test_search_api_reads_only_the_local_index_and_returns_stats(tmp_path) -> No
     )
     test_app = create_app(store)
 
-    with TestClient(test_app) as client:
-        health = client.get("/health")
-        response = client.get("/search", params={"q": "Apokolips search"})
-        stats = client.get("/stats")
+    health = api_request(test_app, "GET", "/health")
+    response = api_request(test_app, "GET", "/search", params={"q": "Apokolips search"})
+    stats = api_request(test_app, "GET", "/stats")
 
     assert health.status_code == 200
     assert health.json()["index"] == "SQLite FTS5"
@@ -234,12 +246,18 @@ def test_crawl_api_persists_spider_output(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(main_module, "ApokolipsSpider", FakeSpider)
     test_app = create_app(store)
 
-    with TestClient(test_app) as client:
-        response = client.post(
-            "/crawl",
-            json={"seeds": ["https://example.com/"], "max_pages": 1, "max_depth": 0},
-        )
-        indexed_search = client.get("/search", params={"q": "persistence token"})
+    response = api_request(
+        test_app,
+        "POST",
+        "/crawl",
+        json={"seeds": ["https://example.com/"], "max_pages": 1, "max_depth": 0},
+    )
+    indexed_search = api_request(
+        test_app,
+        "GET",
+        "/search",
+        params={"q": "persistence token"},
+    )
 
     assert response.status_code == 200
     assert response.json()["indexed_pages"] == 1
@@ -250,11 +268,15 @@ def test_crawl_api_persists_spider_output(monkeypatch, tmp_path) -> None:
 
 def test_search_api_rejects_invalid_pagination_and_query(tmp_path) -> None:
     store = SearchStore(tmp_path / "search.sqlite3")
+    store.initialize()
     test_app = create_app(store)
-
-    with TestClient(test_app) as client:
-        blank_query = client.get("/search", params={"q": "   "})
-        huge_page_size = client.get("/search", params={"q": "word", "page_size": 1000})
+    blank_query = api_request(test_app, "GET", "/search", params={"q": "   "})
+    huge_page_size = api_request(
+        test_app,
+        "GET",
+        "/search",
+        params={"q": "word", "page_size": 1000},
+    )
 
     assert blank_query.status_code == 422
     assert huge_page_size.status_code == 422
