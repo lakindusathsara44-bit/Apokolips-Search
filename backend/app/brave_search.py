@@ -116,15 +116,17 @@ class BraveSearchClient:
         )
 
         try:
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(
+            async with (
+                aiohttp.ClientSession(timeout=timeout) as session,
+                session.get(
                     BRAVE_WEB_SEARCH_URL,
                     params=params,
                     headers={
                         "Accept": "application/json",
                         "X-Subscription-Token": self.api_key,
                     },
-                ) as response:
+                ) as response,
+            ):
                     if response.status in {401, 403}:
                         raise SearchProviderNotConfigured(
                             "The configured web search provider credentials were rejected."
@@ -145,7 +147,7 @@ class BraveSearchClient:
                         ) from exc
         except SearchProviderError:
             raise
-        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+        except (aiohttp.ClientError, TimeoutError) as exc:
             raise SearchProviderError(
                 "The web search provider could not be reached. Please try again."
             ) from exc
