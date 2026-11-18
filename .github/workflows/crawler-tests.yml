@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   python-tests:
-    name: Python \${{ matrix.python-version }} tests
+    name: Python test matrix
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -26,7 +26,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: \${{ matrix.python-version }}
+          python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: backend/requirements-dev.txt
       - name: Install dependencies
