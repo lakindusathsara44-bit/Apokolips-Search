@@ -7,8 +7,8 @@ import httpx
 import pytest
 
 from app.api_access import APIKeyStore
-from app.crawler.parsing import ExtractedDocument
 from app.crawl_queue import CrawlQueue
+from app.crawler.parsing import ExtractedDocument
 from app.main import create_app
 from app.search_store import SearchStore
 
