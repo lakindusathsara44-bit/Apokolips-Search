@@ -356,7 +356,7 @@ class SearchStore:
                     d.description,
                     d.language,
                     snippet(documents_fts, 3, '', '', ' … ', 28) AS excerpt,
-                    bm25(documents_fts, 8.0, 3.0, 4.0, 1.0) AS bm25_rank,
+                    bm25(documents_fts, 20.0, 3.0, 5.0, 1.0) AS bm25_rank,
                     d.last_crawled_at
                 FROM documents_fts
                 JOIN documents AS d ON d.id = documents_fts.rowid
