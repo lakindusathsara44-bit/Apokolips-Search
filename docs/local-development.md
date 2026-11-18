@@ -4,18 +4,11 @@
 
 - Node.js 20.19+ or 22.12+
 - Python 3.11+
+- A Python SQLite build that includes FTS5 (standard official Python builds normally include it)
 
-## Start the frontend
+## Start the backend
 
-    cd frontend
-    npm install
-    npm run dev
-
-Open http://127.0.0.1:5173.
-
-## Start the API
-
-In a second terminal:
+In a terminal:
 
     cd backend
     python -m venv .venv
@@ -24,19 +17,28 @@ In a second terminal:
     python -m pip install -r requirements-dev.txt
     uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
-Health endpoint: http://127.0.0.1:8000/health
+The database is initialized automatically at \`backend/data/apokolips-search.sqlite3\`. The \`APOKOLIPS_DB_PATH\` environment variable can override this location.
+
+API health: http://127.0.0.1:8000/health
 Interactive API docs: http://127.0.0.1:8000/docs
 
-## Run crawler tests
+## Start the frontend
 
-From the backend directory:
+In a second terminal:
 
-    python -m pytest -q
-    python -m ruff check app tests
+    cd frontend
+    npm install
+    npm run dev
 
-## Try Apokolips Spider
+Open http://127.0.0.1:5173. The default API URL is \`http://127.0.0.1:8000\`. To change it, create \`frontend/.env.local\`:
 
-Open http://127.0.0.1:8000/docs, expand POST /crawl, and use a small request:
+    VITE_API_BASE_URL=http://127.0.0.1:8000
+
+Restart Vite after changing environment variables.
+
+## Crawl a small public site
+
+Open the API docs, select \`POST /crawl\`, and submit:
 
     {
       "seeds": ["https://www.example.com/"],
@@ -44,15 +46,37 @@ Open http://127.0.0.1:8000/docs, expand POST /crawl, and use a small request:
       "max_depth": 1
     }
 
-The API is capped at 25 URLs per request. It checks robots.txt, restricts connections to public IP addresses, uses per-host throttling, and limits redirects, bytes, concurrency, and elapsed request time. Use only public sites you are authorized to crawl.
+Only crawl sites you are authorized to crawl. The crawler obeys robots.txt and applies bounded URL counts, timeouts, response sizes, redirects, host delays, and public-address checks.
 
-## Current limitations
+A successful crawl persists the extracted documents and run information to SQLite. It does not mean the entire domain or web has been indexed.
 
-Phase 02 extracts HTML and returns it from the local API. It does not yet save crawl data, build an index, or return search results. The frontend search box remains a foundation preview until a first-party index and search API are implemented.
+## Search your local index
+
+Use the web interface or call:
+
+    http://127.0.0.1:8000/search?q=example+website&page=1&page_size=10
+
+All words are combined with AND semantics. Results are ranked using BM25, with stronger weights for title and heading matches. Pagination is limited to 50 results per page.
+
+Additional endpoints:
+
+- \`/stats\` — index and crawl statistics
+- \`/crawl/runs\` — recent crawl history
+- \`/crawl/runs/{run_id}\` — details of one crawl run
+
+## Run tests and lint
+
+From the backend directory:
+
+    python -m pytest -q
+    python -m ruff check app tests
+
+Tests use temporary SQLite files and mocked crawl output. They do not send requests to third-party websites.
 
 ## Troubleshooting
 
-- If port 5173 is busy, stop the other Vite process before restarting.
-- If Python cannot import app, run Uvicorn from the backend directory.
-- If a host is skipped, inspect its robots.txt and the issues array returned by POST /crawl.
-- Use a supported Node.js LTS release if dependency installation fails.
+- If the frontend says the API cannot be reached, start the backend and check \`/health\`.
+- If the API reports FTS5 unavailable, install a Python distribution linked to an SQLite build with FTS5 enabled.
+- If Python cannot import \`app\`, run Uvicorn from the \`backend\` directory.
+- If a host is skipped, inspect its robots.txt and the crawl issues returned by \`POST /crawl\`.
+- Keep the SQLite database out of Git. Stop the API before making a manual file copy of the database.
