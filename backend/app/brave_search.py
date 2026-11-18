@@ -127,24 +127,24 @@ class BraveSearchClient:
                     },
                 ) as response,
             ):
-                    if response.status in {401, 403}:
-                        raise SearchProviderNotConfigured(
-                            "The configured web search provider credentials were rejected."
-                        )
-                    if response.status == 429:
-                        raise SearchProviderRateLimited(
-                            "The web search provider rate limit has been reached."
-                        )
-                    if response.status != 200:
-                        raise SearchProviderError(
-                            f"The web search provider returned HTTP {response.status}."
-                        )
-                    try:
-                        payload = await response.json(content_type=None)
-                    except (aiohttp.ContentTypeError, ValueError) as exc:
-                        raise SearchProviderError(
-                            "The web search provider returned an invalid response."
-                        ) from exc
+                if response.status in {401, 403}:
+                    raise SearchProviderNotConfigured(
+                        "The configured web search provider credentials were rejected."
+                    )
+                if response.status == 429:
+                    raise SearchProviderRateLimited(
+                        "The web search provider rate limit has been reached."
+                    )
+                if response.status != 200:
+                    raise SearchProviderError(
+                        f"The web search provider returned HTTP {response.status}."
+                    )
+                try:
+                    payload = await response.json(content_type=None)
+                except (aiohttp.ContentTypeError, ValueError) as exc:
+                    raise SearchProviderError(
+                        "The web search provider returned an invalid response."
+                    ) from exc
         except SearchProviderError:
             raise
         except (aiohttp.ClientError, TimeoutError) as exc:
