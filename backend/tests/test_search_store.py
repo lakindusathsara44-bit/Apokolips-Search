@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+
+import httpx
 import pytest
-from fastapi.testclient import TestClient
 
 import app.main as main_module
 from app.crawler.parsing import ExtractedDocument
 from app.crawler.spider import CrawlIssue, CrawlReport
 from app.main import create_app
 from app.search_store import SearchStore, build_fts_query
-
 
 
 def api_request(app, method: str, path: str, **kwargs):
@@ -91,6 +92,7 @@ def test_weighted_bm25_prefers_title_matches_and_paginates(tmp_path) -> None:
     assert first_page["has_more"] is True
     assert first_page["results"][0]["url"] == "https://example.com/title-match"
     assert first_page["results"][0]["relevance_score"] > 0
+    assert first_page["results"][0]["snippet"]
     assert second_page["results"][0]["url"] == "https://example.com/body-match"
     assert second_page["has_more"] is False
 
@@ -179,6 +181,47 @@ def test_crawl_result_is_persisted_with_run_and_url_state(tmp_path) -> None:
     assert stats["documents_indexed"] == 1
     assert stats["tracked_urls"] == 2
     assert store.search("integration")["total_results"] == 1
+
+
+
+def test_early_fts_column_schema_is_migrated_and_rebuilt(tmp_path) -> None:
+    store = SearchStore(tmp_path / "search.sqlite3")
+    store.initialize()
+    store.upsert_documents(
+        [
+            make_page(
+                url="https://example.com/migration",
+                title="Migration heading marker",
+                text="Legacy search content is restored",
+                content_hash="migration",
+            )
+        ]
+    )
+
+    with store._connect() as connection:
+        connection.execute("DROP TRIGGER documents_ai")
+        connection.execute("DROP TRIGGER documents_ad")
+        connection.execute("DROP TRIGGER documents_au")
+        connection.execute("DROP TABLE documents_fts")
+        connection.execute(
+            """
+            CREATE VIRTUAL TABLE documents_fts
+            USING fts5(
+                title,
+                description,
+                headings,
+                body,
+                content='documents',
+                content_rowid='id'
+            )
+            """
+        )
+
+    store.initialize()
+    result = store.search("restored")
+
+    assert result["total_results"] == 1
+    assert result["results"][0]["snippet"] == "Legacy search content is restored"
 
 
 def test_failed_crawl_run_is_recorded(tmp_path) -> None:
