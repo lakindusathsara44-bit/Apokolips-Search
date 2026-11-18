@@ -4,18 +4,19 @@ An independent web search engine project by Apokolips. The search results shown 
 
 ## Current status
 
-**Phase 03 — Local persistent index and first-party ranked web search.**
+**Phase 04 — Durable background crawl queue and worker reliability.**
 
 - Phase 01: React + Vite + TypeScript frontend and FastAPI foundation.
 - Phase 02: Apokolips Spider crawler with robots.txt policy checks, sitemap discovery, safe URL handling, and bounded fetching.
-- Phase 03: SQLite crawl metadata, URL state tracking, SQLite FTS5 indexing, weighted BM25 ranking, search API, and connected React results page.
+- Phase 03: SQLite crawl metadata, SQLite FTS5 indexing, weighted BM25 ranking, search API, and connected React results page.
+- Phase 04: SQLite-backed crawl job queue, background worker, atomic job claiming, worker leases, restart recovery, bounded retries, and job status/cancellation endpoints.
 
 ## Project structure
 
 - frontend/ — React + Vite search experience
-- backend/ — FastAPI API, Apokolips Spider, SQLite store, and FTS5 search index
+- backend/ — FastAPI API, Apokolips Spider, SQLite store/queue, background worker, and FTS5 search index
 - crawler/ — crawler behaviour and operating documentation
-- indexer/ — future standalone/background indexing pipeline
+- indexer/ — future standalone indexing pipeline
 - docs/ — architecture and local setup
 
 ## Quick start
@@ -41,14 +42,24 @@ Open http://127.0.0.1:5173. API documentation is at http://127.0.0.1:8000/docs.
 
 ## Main endpoints
 
-- POST /crawl — crawl a small permitted seed set and persist extracted pages.
+- POST /crawl — run a bounded crawl immediately and persist results.
+- POST /crawl/jobs — enqueue a bounded crawl for background processing; returns HTTP 202.
+- GET /crawl/jobs — list recent crawl jobs.
+- GET /crawl/jobs/{job_id} — inspect a job and its current state.
+- POST /crawl/jobs/{job_id}/cancel — cancel a job only while it is pending.
 - GET /search?q=... — search the local Apokolips index with BM25 ranking.
 - GET /stats — database and index statistics.
 - GET /crawl/runs — recent crawl history.
 - GET /crawl/runs/{run_id} — one crawl run's status and metrics.
 - GET /health — API, database, and FTS5 health check.
 
-The SQLite database is created at backend/data/apokolips-search.sqlite3. Set APOKOLIPS_DB_PATH to choose another location. The database is local application data and is excluded from Git.
+The queue and search index share the SQLite database created at backend/data/apokolips-search.sqlite3. Set APOKOLIPS_DB_PATH to choose another local path. The database is application data and is excluded from Git.
+
+## Background queue behaviour
+
+The API starts one lightweight worker when the application starts. Jobs are claimed atomically in SQLite, have a 180-second worker lease, and are recovered after an application restart. Failed jobs use bounded retries (three attempts by default) with short exponential backoff. A pending job can be cancelled; a running job cannot be force-stopped through the HTTP API. The direct POST /crawl endpoint remains available.
+
+This is a local, single-process queue, not a distributed worker service or recurring cron scheduler. Keep the API bound to localhost and do not expose unauthenticated crawl-control endpoints publicly.
 
 ## Search design
 
