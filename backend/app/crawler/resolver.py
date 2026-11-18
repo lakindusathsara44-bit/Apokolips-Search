@@ -1,6 +1,7 @@
 """A DNS resolver that prevents connections to private and special-use IP ranges."""
 from aiohttp.abc import AbstractResolver
 from aiohttp.resolver import DefaultResolver
+
 from .safety import validate_resolved_addresses
 
 class PublicOnlyResolver(AbstractResolver):
