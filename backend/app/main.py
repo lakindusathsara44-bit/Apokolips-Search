@@ -12,7 +12,14 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Res
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from .brave_search import (\n    BraveSearchClient,\n    ClientSearchRateLimiter,\n    SearchProviderError,\n    SearchProviderNotConfigured,\n    SearchProviderRateLimited,\n)\nfrom .api_access import (
+from .brave_search import (
+    BraveSearchClient,
+    ClientSearchRateLimiter,
+    SearchProviderError,
+    SearchProviderNotConfigured,
+    SearchProviderRateLimited,
+)
+from .api_access import (
     APIKeyStore,
     admin_token_matches,
     configured_admin_token,
@@ -45,11 +52,14 @@ def create_app(
     search_store: SearchStore | None = None,
     crawl_queue: CrawlQueue | None = None,
     api_key_store: APIKeyStore | None = None,
+    brave_search_client: BraveSearchClient | None = None,
 ) -> FastAPI:
     """Application factory; tests may inject isolated database components."""
     store = search_store or SearchStore()
     queue = crawl_queue or CrawlQueue(store.database_path)
     key_store = api_key_store or APIKeyStore(store.database_path)
+    brave_client = brave_search_client or BraveSearchClient()
+    web_search_limiter = ClientSearchRateLimiter(requests_per_minute=30)
     is_public = public_mode_enabled()
     admin_token = configured_admin_token()
 
@@ -97,17 +107,19 @@ def create_app(
 
     api = FastAPI(
         title="Apokolips Search API",
-        version="0.5.0",
+        version="0.6.0",
         description=(
-            "Apokolips Search public API. API-key authenticated search is served from "
-            "Apokolips' own SQLite FTS5 index with per-key request quotas. The local "
-            "crawler and its management endpoints remain administrator-controlled."
+            "Apokolips Search provides a Level 1 Brave-powered web search proxy and a "
+            "separate API-key authenticated first-party SQLite FTS5 search index. "
+            "Crawler and management endpoints remain administrator-controlled."
         ),
         lifespan=lifespan,
     )
     api.state.search_store = store
     api.state.crawl_queue = queue
     api.state.api_key_store = key_store
+    api.state.brave_search_client = brave_client
+    api.state.web_search_limiter = web_search_limiter
 
     configured_origins = os.getenv(
         "APOKOLIPS_CORS_ORIGINS",
@@ -141,7 +153,7 @@ def create_app(
         return {
             "status": "ok",
             "service": "apokolips-search-api",
-            "version": "0.5.0",
+            "version": "0.6.0",
             "database": "ready",
             "index": "SQLite FTS5",
         }
@@ -152,6 +164,7 @@ def create_app(
             "message": "Apokolips Search API",
             "docs": "/docs",
             "search": "/api/v1/search?q=your+query",
+            "web_search": "/api/v1/web-search?q=your+query",
             "api_version": "v1",
         }
 
