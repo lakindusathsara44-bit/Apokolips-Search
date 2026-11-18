@@ -153,7 +153,7 @@ class SearchStore:
 
                 CREATE TRIGGER IF NOT EXISTS documents_au AFTER UPDATE ON documents BEGIN
                     INSERT INTO documents_fts(
-                        documents_fts, rowid, title, description, headings, body
+                        documents_fts, rowid, title, description, headings_json, body
                     )
                     VALUES (
                         'delete', old.id, old.title, old.description,
@@ -182,7 +182,7 @@ class SearchStore:
     @staticmethod
     def _upsert_one(connection: sqlite3.Connection, page: ExtractedDocument, now: str) -> int:
         existing = connection.execute(
-            "SELECT id, first_seen_at FROM documents WHERE canonical_url = ?",
+            "SELECT id FROM documents WHERE canonical_url = ?",
             (page.canonical_url,),
         ).fetchone()
         if existing is None:
